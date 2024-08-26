@@ -33,6 +33,7 @@ def get_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser()
 
+    parser.add_argument("--folder", type=str, default="", help="the folder where the documents are located")
     parser.add_argument("--datapath", type=str, default="", help="The path at which the document is located")
     parser.add_argument("--output", type=str, default="./", help="The path at which to save the dataset")
     parser.add_argument("--output-format", type=str, default="hf", help="Format to convert the dataset to. Defaults to hf.", choices=datasetFormats)
@@ -45,7 +46,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--doctype", type=str, default="pdf", help="The type of the document, must be one of the accepted doctypes", choices=["pdf", "txt", "json", "api"])
     parser.add_argument("--openai_key", type=str, default=None, help="Your OpenAI key used to make queries to GPT-3.5 or GPT-4")
     parser.add_argument("--embedding_model", type=str, default="text-embedding-ada-002", help="The embedding model to use to encode documents chunks (text-embedding-ada-002, ...)")
-    parser.add_argument("--completion_model", type=str, default="gpt-4", help="The model to use to generate questions and answers (gpt-3.5, gpt-4, ...)")
+    parser.add_argument("--completion_model", type=str, default="gpt-4o", help="The model to use to generate questions and answers (gpt-3.5, gpt-4, ...)")
     parser.add_argument("--fast", action="store_true", help="Run the script in fast mode (no recovery implemented)")
 
     args = parser.parse_args()
@@ -102,6 +103,7 @@ def get_chunks(
 
         embeddings = build_langchain_embeddings(openai_api_key=openai_key, model=model)
         text_splitter = SemanticChunker(embeddings, number_of_chunks=num_chunks)
+              
         chunks = text_splitter.create_documents([text])
         chunks = [chunk.page_content for chunk in chunks]
             
@@ -294,7 +296,6 @@ def load_checkpoint(filename):
 
 def main():
     global ds
-
     # run code
     args = get_args()
 
@@ -311,68 +312,81 @@ def main():
     CHUNK_SIZE = args.chunk_size
     NUM_DISTRACT_DOCS = args.distractors
 
-    chunks = get_chunks(args.datapath, args.doctype, CHUNK_SIZE, OPENAPI_API_KEY, model=args.embedding_model)
+    def process_file(inputFilePath):
+        logger.info(f"Start to process {inputFilePath}")
+        inputFilePath = os.path.join(args.folder, inputFilePath)   
+        chunks = get_chunks(inputFilePath, args.doctype, CHUNK_SIZE, OPENAPI_API_KEY, model=args.embedding_model)
 
-    ds = None
+        ds = None
 
-    num_chunks = len(chunks)
+        num_chunks = len(chunks)
 
-    if not args.fast:
-        start = 0
-        if os.path.exists("checkpoint.txt"):
-            start = int(load_checkpoint("checkpoint.txt"))
+        inputFileName = os.path.basename(inputFilePath)
+        checkpointFilenName = inputFileName + "-checkpoint.txt"
+        if not args.fast:
+            start = 0
 
-        for i in range((start//N)*N, len(chunks)):
-            chunk = chunks[i]
-            save_checkpoint(i, "checkpoint.txt")
+            if os.path.exists(checkpointFilenName):
+                start = int(load_checkpoint(checkpointFilenName))
 
-            perc = ceil(i / num_chunks * 100)
-            with MDC(progress=f"{perc}%"):
-                logger.info(f"Adding chunk {i}/{num_chunks}")
-                add_chunk_to_dataset(client, chunks, chunk, args.doctype, args.questions, NUM_DISTRACT_DOCS, model=args.completion_model)
+            for i in range((start//N)*N, len(chunks)):
+                chunk = chunks[i]
+                save_checkpoint(i, checkpointFilenName)
 
-            if (i+1) % N == 0:
-                ds.save_to_disk(args.output + "-checkpoints-" + str(i))
-                ds = None
-    
-    
-        if ds:
-            ds.save_to_disk(args.output + "-checkpoints-last")
+                perc = ceil(i / num_chunks * 100)
+                with MDC(progress=f"{perc}%"):
+                    logger.info(f"Adding chunk {i}/{num_chunks}/{inputFileName}")
+                    add_chunk_to_dataset(client, chunks, chunk, args.doctype, args.questions, NUM_DISTRACT_DOCS, model=args.completion_model)
 
-        ds_list = []
+                if (i+1) % N == 0:
+                    ds.save_to_disk(args.output + inputFileName + "-checkpoints-" + str(i))
+                    ds = None
+            
+            
+            if ds:
+                ds.save_to_disk(args.output + inputFileName + "-checkpoints-last")
 
-        for filename in os.listdir(os.path.dirname(args.output)):
-            if "-checkpoints-" in filename:
-                for f in os.listdir(os.path.dirname(args.output) + "/" + filename):
-                    if f.endswith(".arrow"):
-                        ds_list.append(Dataset.from_file(os.path.dirname(args.output) + "/" + filename + "/" + f))
+            ds_list = []
 
-        ds = datasets.concatenate_datasets(ds_list)
+            for filename in os.listdir(os.path.dirname(args.output)):
+                if f"{inputFileName} + -checkpoints-" in filename:
+                    for f in os.listdir(os.path.dirname(args.output) + "/" + filename):
+                        if f.endswith(".arrow"):
+                            ds_list.append(Dataset.from_file(os.path.dirname(args.output) + "/" + filename + "/" + f))
+
+            ds = datasets.concatenate_datasets(ds_list)
+        else:
+            for i, chunk in enumerate(chunks):
+                perc = ceil(i / num_chunks * 100)
+                with MDC(progress=f"{perc}%"):
+                    logger.info(f"Adding chunk {i}/{num_chunks}/{filename}")
+                    add_chunk_to_dataset(client, chunks, chunk, args.doctype, args.questions, NUM_DISTRACT_DOCS, model=args.completion_model)
+            
+        # Save as .arrow format
+        output_file = args.output + "-" + inputFileName
+        ds.save_to_disk(output_file)
+
+        # Save as .jsonl format
+        formatter = DatasetConverter()
+
+        # Extract format specific params
+        format_params = {}
+        if args.output_chat_system_prompt:
+            format_params['system_prompt'] = args.output_chat_system_prompt
+
+        formatter.convert(ds=ds, format=args.output_format, output_path=output_file, output_type=args.output_type, params=format_params)
+
+        if not args.fast:
+            os.remove(checkpointFilenName)
+            for filename in os.listdir(os.path.dirname(args.output)):
+                if f"{inputFileName} + -checkpoints-"  in filename:
+                    shutil.rmtree(os.path.dirname(args.output) + "/" + filename)
+
+    if args.folder:
+        for inputFilePath in os.listdir(args.folder):
+            process_file(inputFilePath)
     else:
-        for i, chunk in enumerate(chunks):
-            perc = ceil(i / num_chunks * 100)
-            with MDC(progress=f"{perc}%"):
-                logger.info(f"Adding chunk {i}/{num_chunks}")
-                add_chunk_to_dataset(client, chunks, chunk, args.doctype, args.questions, NUM_DISTRACT_DOCS, model=args.completion_model)
-    
-    # Save as .arrow format
-    ds.save_to_disk(args.output)
-
-    # Save as .jsonl format
-    formatter = DatasetConverter()
-
-    # Extract format specific params
-    format_params = {}
-    if args.output_chat_system_prompt:
-        format_params['system_prompt'] = args.output_chat_system_prompt
-
-    formatter.convert(ds=ds, format=args.output_format, output_path=args.output, output_type=args.output_type, params=format_params)
-
-    if not args.fast:
-        os.remove("checkpoint.txt")
-        for filename in os.listdir(os.path.dirname(args.output)):
-            if "-checkpoints-" in filename:
-                shutil.rmtree(os.path.dirname(args.output) + "/" + filename)
+        process_file(args.datapath)    
 
 if __name__ == "__main__":
     with MDC(progress="0%"):

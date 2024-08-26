@@ -37,5 +37,9 @@ berkeley-function-call-leaderboard/result/
 # Ignore leaderboard score
 berkeley-function-call-leaderboard/score/
 
+# Ignore learn data
+raft/learn-data/
+raft/learn-data-output-azure-ai-services/
+
 .direnv/
 .venv

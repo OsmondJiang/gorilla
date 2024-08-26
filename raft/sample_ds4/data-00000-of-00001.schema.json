@@ -1,0 +1,99 @@
+{
+  "fields": [
+    {
+      "name": "id",
+      "type": {},
+      "nullable": true,
+      "metadata": {}
+    },
+    {
+      "name": "type",
+      "type": {},
+      "nullable": true,
+      "metadata": {}
+    },
+    {
+      "name": "question",
+      "type": {},
+      "nullable": true,
+      "metadata": {}
+    },
+    {
+      "name": "context",
+      "type": {
+        "children": [
+          {
+            "name": "sentences",
+            "type": {
+              "children": [
+                {
+                  "name": "item",
+                  "type": {
+                    "children": [
+                      {
+                        "name": "item",
+                        "type": {},
+                        "nullable": true,
+                        "metadata": {}
+                      }
+                    ]
+                  },
+                  "nullable": true,
+                  "metadata": {}
+                }
+              ]
+            },
+            "nullable": true,
+            "metadata": {}
+          },
+          {
+            "name": "title",
+            "type": {
+              "children": [
+                {
+                  "name": "item",
+                  "type": {
+                    "children": [
+                      {
+                        "name": "item",
+                        "type": {},
+                        "nullable": true,
+                        "metadata": {}
+                      }
+                    ]
+                  },
+                  "nullable": true,
+                  "metadata": {}
+                }
+              ]
+            },
+            "nullable": true,
+            "metadata": {}
+          }
+        ]
+      },
+      "nullable": true,
+      "metadata": {}
+    },
+    {
+      "name": "oracle_context",
+      "type": {},
+      "nullable": true,
+      "metadata": {}
+    },
+    {
+      "name": "cot_answer",
+      "type": {},
+      "nullable": true,
+      "metadata": {}
+    },
+    {
+      "name": "instruction",
+      "type": {},
+      "nullable": true,
+      "metadata": {}
+    }
+  ],
+  "metadata": {},
+  "dictionaries": {}
+}
